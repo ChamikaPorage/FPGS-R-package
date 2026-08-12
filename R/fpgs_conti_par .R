@@ -1,16 +1,18 @@
-#' Estimate Full Prognostic Scores
+#' Estimate Continuous FPGS Using Parametric Regression
 #'
-#' Estimates the prognostic scores
-#' E[Y(0)|X] and E[Y(1)|X]
+#' Estimates the Full Prognostic Score for a continuous outcome by fitting
+#' separate linear regression models in the treated and untreated groups.
 #'
-#' @param data Data frame
-#' @param outcome Outcome variable name
-#' @param treatment Treatment variable name
-#' @param covariates Covariate names
+#' @param data Data frame containing the observed data.
+#' @param outcome Continuous outcome variable name.
+#' @param treatment Treatment variable name.
+#' @param covariates Covariate names. If NULL, all variables other than
+#'   the outcome and treatment are used.
 #'
-#' @return An object of class "fpgs"
+#' @return An object of class \code{"fpgs"} containing the estimated
+#'   conditional outcome means and the estimated FPGS.
 #'
-#' @export
+#' @keywords internal
 
 fpgs_continuous_parametric <- function(data,
                                        outcome,
