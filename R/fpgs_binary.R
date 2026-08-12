@@ -1,3 +1,14 @@
+#' Estimate Binary FPGS Using Parametric Regression
+#'
+#' @param data Data frame containing the observed data.
+#' @param outcome Binary outcome variable name.
+#' @param treatment Treatment variable name.
+#' @param covariates Covariate names. If NULL, all variables other than
+#'   the outcome and treatment are used.
+#'
+#' @return An object of class \code{"fpgs"}.
+#'
+#' @keywords internal
 
 fpgs_binary <- function(data,
                         outcome,
