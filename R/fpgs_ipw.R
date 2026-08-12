@@ -1,11 +1,18 @@
 #' FPGS Weighting Estimator
 #'
-#' Estimates ATE using propensity scores estimated from FPGS.
+#' Estimates the average treatment effect (ATE) using propensity scores
+#' estimated from the two-dimensional Full Prognostic Score.
 #'
-#' @param fit An object returned by fpgs()
-#' #' @param type Weighting estimator: "ipw", "normalized", or "aipw"
+#' @param fit An object of class \code{"fpgs"} returned by \code{fpgs()}.
+#' @param type Character string specifying the weighting estimator:
+#'   \code{"ipw"}, \code{"normalized"}, or \code{"aipw"}.
+#'
+#' @return An object of class \code{"fpgs_weight"} containing the ATE estimate,
+#'   estimated treatment-specific means, estimated propensity scores, and the
+#'   fitted propensity score model.
 #'
 #' @export
+
 fpgs_weight <- function(fit, type = c("ipw", "normalized", "aipw")) {
   
   type <- match.arg(type)
