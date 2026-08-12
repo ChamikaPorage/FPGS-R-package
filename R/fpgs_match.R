@@ -1,14 +1,17 @@
 #' FPGS Matching Estimator
 #'
-#' Estimates the ATE by matching on the two-dimensional FPGS:
-#' mu0_hat and mu1_hat.
+#' Estimates the average treatment effect (ATE) by matching on the
+#' two-dimensional estimated Full Prognostic Score.
 #'
-#' @param fit An object returned by fpgs()
-#' @param M Number of matches. Default is 1.
+#' @param fit An object of class \code{"fpgs"} returned by \code{fpgs()}.
+#' @param M Number of matches used for each unit. Default is 1.
 #'
-#' @return An object of class "fpgs_match"
+#' @return An object of class \code{"fpgs_match"} containing the ATE estimate,
+#'   standard error, number of matches, and the matching object returned by
+#'   \code{Matching::Match()}.
 #'
 #' @export
+
 fpgs_match <- function(fit, M = 1) {
 
   if (!inherits(fit, "fpgs")) {
