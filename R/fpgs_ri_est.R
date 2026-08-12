@@ -1,8 +1,12 @@
 #' FPGS Regression Imputation Estimator
 #'
-#' @param fit An object returned by fpgs()
+#' Estimates the average treatment effect (ATE) using regression imputation
+#' based on the estimated Full Prognostic Score.
 #'
-#' @return An object of class "fpgs_ri"
+#' @param fit An object of class \code{"fpgs"} returned by \code{fpgs()}.
+#'
+#' @return An object of class \code{"fpgs_ri"} containing the ATE estimate,
+#'   estimated conditional outcome means, and individual treatment effects.
 #'
 #' @export
 fpgs_ri <- function(fit) {
