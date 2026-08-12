@@ -1,7 +1,7 @@
 #' Estimate the Full Prognostic Score
 #'
 #' Estimates the two-dimensional Full Prognostic Score (FPGS) using
-#' parametric or random forest(rf) outcome models for continuous or binary
+#' parametric or random forest (rf) outcome models for continuous or binary
 #' outcomes.
 #'
 #' @param data A data frame containing the observed data.
