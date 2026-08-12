@@ -1,11 +1,31 @@
 Package: FPGS
-Title: What the Package Does (One Line, Title Case)
-Version: 0.0.0.9000
-Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: What the package does (one paragraph).
-License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
-    license
+Title: Full Prognostic Score Methods for Causal Effect Estimation
+Version: 0.1.0
+
+Authors@R:
+    c(
+      person(
+        given = "Chamika",
+        family = "Porage",
+        email = "chamika.porage@statistik.uu.se",
+        role = c("aut", "cre")
+      ),
+      person(
+        given = "Ingeborg",
+        family = "Waernbaum",
+        email = "ingeborg.waernbaum@statistik.uu.se",
+        role = "aut"
+      )
+    )
+
+Description: Implements Full Prognostic Score methods for causal effect
+    estimation using parametric and machine-learning approaches. The package
+    provides regression imputation, matching, stratification, inverse
+    probability weighting, normalized inverse probability weighting, and
+    augmented inverse probability weighting estimators for continuous and
+    binary outcomes.
+
+License: GPL-3
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
