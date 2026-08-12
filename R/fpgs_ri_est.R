@@ -1,7 +1,7 @@
 #' FPGS Regression Imputation Estimator
 #'
 #' Estimates the average treatment effect (ATE) using regression imputation
-#' based on the estimated Full Prognostic Score.
+#' based on the estimated FPGS.
 #'
 #' @param fit An object of class \code{"fpgs"} returned by \code{fpgs()}.
 #'
