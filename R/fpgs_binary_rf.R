@@ -1,12 +1,24 @@
-#' Estimate Binary FPGS using Random Forest with Cross-Fitting
+#' Estimate Binary FPGS Using Random Forest with Cross-Fitting
 #'
-#' @param data Data frame
-#' @param outcome Binary outcome variable name
-#' @param treatment Treatment variable name
-#' @param covariates Covariate names
-#' @param folds Number of folds
+#' Estimates the Full Prognostic Score for a binary outcome using
+#' random forest probability models with cross-fitting.
 #'
-#' @export
+#' @param data Data frame containing the observed data.
+#' @param outcome Binary outcome variable name.
+#' @param treatment Treatment variable name.
+#' @param covariates Covariate names. If NULL, all variables other than
+#'   the outcome and treatment are used.
+#' @param folds Number of folds used for cross-fitting. Default is 5.
+#' @param num.trees Number of trees used in each random forest. Default is 300.
+#' @param mtry Number of variables considered at each split. If NULL,
+#'   it is set to the square root of the number of covariates.
+#' @param min.node.size Minimum terminal node size. Default is 5.
+#'
+#' @return An object of class \code{"fpgs"} containing the cross-fitted
+#'   estimates of mu0_hat and mu1_hat and the estimated FPGS.
+#'
+#' @keywords internal
+
 fpgs_binary_rf <- function(data,
                            outcome,
                            treatment,
