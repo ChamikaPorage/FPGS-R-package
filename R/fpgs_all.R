@@ -1,8 +1,21 @@
 #' Run All FPGS Estimators
 #'
-#' @param fit An object returned by fpgs()
+#' Runs regression imputation, matching, inverse probability weighting,
+#' normalized inverse probability weighting, augmented inverse probability
+#' weighting, and stratification estimators using an estimated FPGS.
 #'
-#' @return Data frame containing ATE estimates
+#' @param fit An object returned by \code{fpgs()}.
+#' @param inference Logical. If \code{FALSE}, only point estimates are returned.
+#'   If \code{TRUE}, bootstrap standard errors and confidence intervals are
+#'   computed for all estimators.
+#' @param B Number of bootstrap replications. Default is 500.
+#' @param conf.level Confidence level for bootstrap confidence intervals.
+#'   Default is 0.95.
+#' @param ... Additional arguments passed to \code{fpgs_bootstrap()}.
+#'
+#' @return A data frame containing treatment effect estimates. When
+#'   \code{inference = TRUE}, bootstrap standard errors and confidence
+#'   intervals are also returned.
 #'
 #' @export
 
