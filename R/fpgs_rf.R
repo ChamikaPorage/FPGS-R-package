@@ -1,7 +1,7 @@
 #' Estimate Continuous FPGS Using Random Forest with Cross-Fitting
 #'
-#' Estimates the Full Prognostic Score for a continuous outcome using
-#' separate random forest models in the treated and untreated groups with
+#' Estimates the FPGS for a continuous outcome using
+#' separate random forest (rf) models in the treated and untreated groups with
 #' cross-fitted predictions.
 #'
 #' @param data Data frame containing the observed data.
@@ -10,7 +10,7 @@
 #' @param covariates Covariate names. If NULL, all variables other than
 #'   the outcome and treatment are used.
 #' @param folds Number of folds used for cross-fitting. Default is 5.
-#' @param num.trees Number of trees used in each random forest. Default is 500.
+#' @param num.trees Number of trees used in each rf. Default is 500.
 #' @param mtry Number of variables considered at each split. If NULL,
 #'   it is set to the square root of the number of covariates.
 #' @param min.node.size Minimum terminal node size. Default is 5.
