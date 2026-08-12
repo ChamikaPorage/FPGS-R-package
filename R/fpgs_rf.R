@@ -1,12 +1,24 @@
-#' Estimate FPGS using random forest with cross-fitting
+#' Estimate Continuous FPGS Using Random Forest with Cross-Fitting
 #'
-#' @param data Data frame
-#' @param outcome Outcome variable name
-#' @param treatment Treatment variable name
-#' @param covariates Covariate names
-#' @param folds Number of folds
+#' Estimates the Full Prognostic Score for a continuous outcome using
+#' separate random forest models in the treated and untreated groups with
+#' cross-fitted predictions.
 #'
-#' @export
+#' @param data Data frame containing the observed data.
+#' @param outcome Continuous outcome variable name.
+#' @param treatment Treatment variable name.
+#' @param covariates Covariate names. If NULL, all variables other than
+#'   the outcome and treatment are used.
+#' @param folds Number of folds used for cross-fitting. Default is 5.
+#' @param num.trees Number of trees used in each random forest. Default is 500.
+#' @param mtry Number of variables considered at each split. If NULL,
+#'   it is set to the square root of the number of covariates.
+#' @param min.node.size Minimum terminal node size. Default is 5.
+#'
+#' @return An object of class \code{"fpgs"} containing the cross-fitted
+#'   estimates of \code{mu0_hat} and \code{mu1_hat} and the estimated FPGS.
+#'
+#' @keywords internal
 fpgs_rf <- function(data,
                     outcome,
                     treatment,
