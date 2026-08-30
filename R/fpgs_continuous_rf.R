@@ -7,7 +7,7 @@
 #' @param data Data frame containing the observed data.
 #' @param outcome Continuous outcome variable name.
 #' @param treatment Treatment variable name.
-#' @param covariates Covariate names. If NULL, all variables other than
+#' @param covariates Pre treatment variables names. If NULL, all variables other than
 #'   the outcome and treatment are used.
 #' @param folds Number of folds used for cross-fitting. Default is 5.
 #' @param num.trees Number of trees used in each rf. Default is 500.
@@ -19,7 +19,7 @@
 #'   estimates of \code{mu0_hat} and \code{mu1_hat} and the estimated FPGS.
 #'
 #' @keywords internal
-fpgs_rf <- function(data,
+fpgs_continuous_rf <- function(data,
                     outcome,
                     treatment,
                     covariates = NULL,
@@ -27,51 +27,51 @@ fpgs_rf <- function(data,
                     num.trees = 500,
                     mtry = NULL,
                     min.node.size = 5) {
-  
+
   if (!requireNamespace("ranger", quietly = TRUE)) {
     stop("Package 'ranger' is required.")
   }
-  
+
   if (!requireNamespace("caret", quietly = TRUE)) {
     stop("Package 'caret' is required.")
   }
-  
+
   dat <- as.data.frame(data)
-  
+
   if (is.null(covariates)) {
     covariates <- setdiff(names(dat), c(outcome, treatment))
   }
-  
+
   if (is.null(mtry)) {
     mtry <- max(1, floor(sqrt(length(covariates))))
   }
-  
+
   Y <- dat[[outcome]]
   Tr <- dat[[treatment]]
   n <- nrow(dat)
-  
+
   fold_id <- caret::createFolds(Y, k = folds, list = TRUE)
-  
+
   mu0_hat <- rep(NA_real_, n)
   mu1_hat <- rep(NA_real_, n)
-  
+
   model_data <- dat[, c(outcome, treatment, covariates), drop = FALSE]
-  
-  form <- as.formula(
+
+  form <- stats::as.formula(
     paste(outcome, "~", paste(covariates, collapse = " + "))
   )
-  
+
   for (k in seq_len(folds)) {
-    
-    train_idx <- unlist(fold_id[-k])
-    valid_idx <- fold_id[[k]]
-    
-    train_data <- model_data[train_idx, , drop = FALSE]
-    valid_data <- model_data[valid_idx, , drop = FALSE]
-    
+
+    train_index <- unlist(fold_id[-k])
+    valid_index <- fold_id[[k]]
+
+    train_data <- model_data[train_index, , drop = FALSE]
+    valid_data <- model_data[valid_index, , drop = FALSE]
+
     train_data_0 <- train_data[train_data[[treatment]] == 0, , drop = FALSE]
     train_data_1 <- train_data[train_data[[treatment]] == 1, , drop = FALSE]
-    
+
     rf0 <- ranger::ranger(
       formula = form,
       data = train_data_0,
@@ -79,7 +79,7 @@ fpgs_rf <- function(data,
       mtry = mtry,
       min.node.size = min.node.size
     )
-    
+
     rf1 <- ranger::ranger(
       formula = form,
       data = train_data_1,
@@ -87,13 +87,13 @@ fpgs_rf <- function(data,
       mtry = mtry,
       min.node.size = min.node.size
     )
-    
-    mu0_hat[valid_idx] <- predict(rf0, data = valid_data)$predictions
-    mu1_hat[valid_idx] <- predict(rf1, data = valid_data)$predictions
+
+    mu0_hat[valid_index] <- stats::predict(rf0, data = valid_data)$predictions
+    mu1_hat[valid_index] <- stats::predict(rf1, data = valid_data)$predictions
   }
-  
+
   out <- list(
-    data = dat,
+    data = data,
     outcome = outcome,
     treatment = treatment,
     covariates = covariates,
@@ -103,15 +103,17 @@ fpgs_rf <- function(data,
       mu0_hat = mu0_hat,
       mu1_hat = mu1_hat
     ),
-    outcome_type = "continuous",
+    outcome_type = "binary",
     method = "rf",
     learner = "random forest",
     crossfit = TRUE,
     folds = folds,
-    mtry = mtry
+    num.trees = num.trees,
+    mtry = mtry,
+    min.node.size = min.node.size
   )
-  
+
   class(out) <- "fpgs"
-  
+
   out
 }
