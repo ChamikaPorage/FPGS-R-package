@@ -7,11 +7,19 @@
 #' @param M Number of matches used for each unit. Default is 1.
 #'
 #' @return An object of class \code{"fpgs_match"} containing the ATE estimate,
-#'   standard error, number of matches, and the matching object returned by
-#'   \code{Matching::Match()}.
+#'   estimated variance and standard error, number of matches, and the
+#'   matching object returned by \code{Matching::Match()}.
+#'
+#' @details
+#' Matching is performed directly on the two-dimensional estimated FPGS using
+#' \code{Matching::Match()}. The analytic standard error is obtained directly
+#' from \code{Matching::Match()}, and the variance is calculated as the squared
+#' standard error.
+#'
+#' For FPGS estimated using random forests, bootstrap inference may be used
+#' to account for uncertainty in estimation of the FPGS.
 #'
 #' @export
-
 fpgs_match <- function(fit, M = 1) {
 
   if (!inherits(fit, "fpgs")) {
@@ -19,7 +27,10 @@ fpgs_match <- function(fit, M = 1) {
   }
 
   if (!requireNamespace("Matching", quietly = TRUE)) {
-    stop("Package 'Matching' is required. Install it with install.packages('Matching').")
+    stop(
+      "Package 'Matching' is required. ",
+      "Install it with install.packages('Matching')."
+    )
   }
 
   dat <- fit$data
@@ -37,9 +48,14 @@ fpgs_match <- function(fit, M = 1) {
     M = M
   )
 
+  estimate <- unname(match_obj$est)
+  se <- unname(match_obj$se.standard)
+  variance <- se^2
+
   out <- list(
-    estimate = unname(match_obj$est),
-    se = unname(match_obj$se.standard),
+    estimate = estimate,
+    variance = variance,
+    se = se,
     M = M,
     match_object = match_obj,
     method = "FPGS matching",
@@ -47,5 +63,6 @@ fpgs_match <- function(fit, M = 1) {
   )
 
   class(out) <- "fpgs_match"
+
   out
 }
