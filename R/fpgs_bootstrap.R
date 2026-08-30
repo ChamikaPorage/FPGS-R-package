@@ -1,26 +1,45 @@
-#' Bootstrap inference for FPGS estimators
+#' Bootstrap Inference for FPGS Estimators
 #'
-#' Computes bootstrap standard errors and confidence intervals for FPGS
-#' estimators by resampling observations, refitting the FPGS model, and
-#' recomputing the selected treatment effect estimator in each bootstrap sample.
+#' Computes bootstrap standard errors and percentile confidence intervals
+#' for FPGS treatment effect estimators.
 #'
-#' @param fit An object returned by [fpgs()].
+#' @param fit An object of class \code{"fpgs"} returned by \code{fpgs()}.
 #' @param estimator Character string specifying the estimator. One of
-#'   "ri", "matching", "stratification", "ipw", "normalized", or "aipw".
+#'   \code{"ri"}, \code{"matching"}, \code{"ipw"}, \code{"nipw"},
+#'   \code{"aipw"}, or \code{"stratification"}.
 #' @param B Number of bootstrap replications. Default is 500.
 #' @param conf.level Confidence level for the percentile bootstrap interval.
 #'   Default is 0.95.
 #' @param seed Optional random seed.
-#' @param verbose Logical. If TRUE, prints progress.
-#' @param ... Additional arguments passed to estimator functions, for example
-#'   M for [fpgs_match()] or n_strata for [fpgs_stratify()].
+#' @param verbose Logical. If \code{TRUE}, prints bootstrap progress.
+#' @param ... Additional arguments passed to the treatment effect estimator,
+#'   such as \code{M} for \code{fpgs_match()} or \code{n_bins} and
+#'   \code{min_cell} for \code{fpgs_stratify()}.
 #'
-#' @return An object of class "fpgs_bootstrap".
+#' @return An object of class \code{"fpgs_bootstrap"} containing the point
+#'   estimate, bootstrap variance and standard error, percentile confidence
+#'   interval, bootstrap estimates, and number of valid bootstrap replications.
+#'
+#' @details
+#' In each bootstrap replication, observations are sampled with replacement.
+#' The FPGS is then re-estimated using the same outcome type and estimation
+#' method as in the original fit, after which the selected treatment effect
+#' estimator is recomputed.
+#'
+#' Bootstrap standard errors are calculated as the standard deviation of the
+#' valid bootstrap estimates. Percentile confidence intervals are obtained
+#' from the corresponding empirical bootstrap quantiles.
 #'
 #' @export
 fpgs_bootstrap <- function(fit,
-                           estimator = c("ri", "matching",
-                                         "ipw", "normalized", "aipw", "stratification"),
+                           estimator = c(
+                             "ri",
+                             "matching",
+                             "ipw",
+                             "nipw",
+                             "aipw",
+                             "stratification"
+                           ),
                            B = 500,
                            conf.level = 0.95,
                            seed = NULL,
@@ -46,12 +65,12 @@ fpgs_bootstrap <- function(fit,
     set.seed(seed)
   }
 
-  dat <- as.data.frame(fit$data)
-  n <- nrow(dat)
+  data <- as.data.frame(fit$data)
+  n <- nrow(data)
 
-  theta_hat <- .fpgs_apply_estimator(fit, estimator, ...)
+  estimate <- .fpgs_apply_estimator(fit, estimator, ...)
 
-  boot_est <- rep(NA_real_, B)
+  bootstrap_estimates <- rep(NA_real_, B)
 
   for (b in seq_len(B)) {
 
@@ -59,42 +78,68 @@ fpgs_bootstrap <- function(fit,
       message("Bootstrap replication ", b, " of ", B)
     }
 
-    idx <- sample(seq_len(n), size = n, replace = TRUE)
-    dat_b <- dat[idx, , drop = FALSE]
+    bootstrap_index <- sample(seq_len(n), size = n, replace = TRUE)
+    bootstrap_data <- data[bootstrap_index, , drop = FALSE]
 
-    boot_est[b] <- tryCatch({
-      fit_b <- .fpgs_refit(fit, dat_b)
-      .fpgs_apply_estimator(fit_b, estimator, ...)
-    }, error = function(e) {
-      NA_real_
-    })
+    bootstrap_estimates[b] <- tryCatch(
+      {
+        bootstrap_fit <- .fpgs_refit(fit, bootstrap_data)
+
+        .fpgs_apply_estimator(
+          bootstrap_fit,
+          estimator,
+          ...
+        )
+      },
+      error = function(e) {
+        NA_real_
+      }
+    )
   }
 
-  boot_est_valid <- boot_est[is.finite(boot_est)]
+  valid_estimates <- bootstrap_estimates[
+    is.finite(bootstrap_estimates)
+  ]
 
-  if (length(boot_est_valid) < 2) {
-    stop("Fewer than two valid bootstrap estimates were obtained.", call. = FALSE)
+  B_valid <- length(valid_estimates)
+
+  if (B_valid < 2) {
+    stop(
+      "Fewer than two valid bootstrap estimates were obtained.",
+      call. = FALSE
+    )
   }
+
+  if (B_valid < 0.9 * B) {
+    warning(
+      "More than 10% of bootstrap replications failed. ",
+      "Bootstrap inference may be unreliable.",
+      call. = FALSE
+    )
+  }
+
+  se <- stats::sd(valid_estimates)
+  variance <- se^2
 
   alpha <- 1 - conf.level
 
-  se <- stats::sd(boot_est_valid)
-  ci <- stats::quantile(
-    boot_est_valid,
+  conf_int <- stats::quantile(
+    valid_estimates,
     probs = c(alpha / 2, 1 - alpha / 2),
     na.rm = TRUE,
     names = FALSE
   )
 
   out <- list(
-    estimate = theta_hat,
+    estimate = estimate,
+    variance = variance,
     se = se,
-    conf.int = ci,
+    conf.int = conf_int,
     conf.level = conf.level,
-    boot_estimates = boot_est_valid,
-    boot_estimates_all = boot_est,
+    boot_estimates = valid_estimates,
+    boot_estimates_all = bootstrap_estimates,
     B = as.integer(B),
-    B_valid = length(boot_est_valid),
+    B_valid = B_valid,
     estimator = estimator,
     outcome_type = fit$outcome_type,
     fpgs_method = fit$method,
@@ -102,14 +147,17 @@ fpgs_bootstrap <- function(fit,
   )
 
   class(out) <- "fpgs_bootstrap"
+
   out
 }
 
 
-# Internal helper: refit the same FPGS model on a bootstrap sample.
+# Internal helper for refitting the FPGS in a bootstrap sample
 .fpgs_refit <- function(fit, data) {
 
-  if (fit$outcome_type == "continuous" && fit$method == "parametric") {
+  if (fit$outcome_type == "continuous" &&
+      fit$method == "parametric") {
+
     return(
       fpgs_continuous_parametric(
         data = data,
@@ -120,9 +168,11 @@ fpgs_bootstrap <- function(fit,
     )
   }
 
-  if (fit$outcome_type == "binary" && fit$method == "parametric") {
+  if (fit$outcome_type == "binary" &&
+      fit$method == "parametric") {
+
     return(
-      fpgs_binary(
+      fpgs_binary_parametric(
         data = data,
         outcome = fit$outcome,
         treatment = fit$treatment,
@@ -131,9 +181,11 @@ fpgs_bootstrap <- function(fit,
     )
   }
 
-  if (fit$outcome_type == "continuous" && fit$method == "rf") {
+  if (fit$outcome_type == "continuous" &&
+      fit$method == "rf") {
+
     return(
-      fpgs_rf(
+      fpgs_continuous_rf(
         data = data,
         outcome = fit$outcome,
         treatment = fit$treatment,
@@ -144,7 +196,9 @@ fpgs_bootstrap <- function(fit,
     )
   }
 
-  if (fit$outcome_type == "binary" && fit$method == "rf") {
+  if (fit$outcome_type == "binary" &&
+      fit$method == "rf") {
+
     return(
       fpgs_binary_rf(
         data = data,
@@ -152,7 +206,9 @@ fpgs_bootstrap <- function(fit,
         treatment = fit$treatment,
         covariates = fit$covariates,
         folds = fit$folds,
-        mtry = fit$mtry
+        num.trees = fit$num.trees,
+        mtry = fit$mtry,
+        min.node.size = fit$min.node.size
       )
     )
   }
@@ -161,7 +217,7 @@ fpgs_bootstrap <- function(fit,
 }
 
 
-# Internal helper: apply one ATE estimator to an FPGS object.
+# Internal helper for applying one treatment effect estimator
 .fpgs_apply_estimator <- function(fit, estimator, ...) {
 
   if (estimator == "ri") {
@@ -172,27 +228,31 @@ fpgs_bootstrap <- function(fit,
     return(fpgs_match(fit, ...)$estimate)
   }
 
-  if (estimator %in% c("ipw", "normalized", "aipw")) {
+  if (estimator %in% c("ipw", "nipw", "aipw")) {
     return(fpgs_weight(fit, type = estimator)$estimate)
   }
 
   if (estimator == "stratification") {
     return(fpgs_stratify(fit, ...)$estimate)
   }
+
   stop("Unknown estimator.", call. = FALSE)
 }
 
 
-#' Print method for FPGS bootstrap inference
+#' Print Method for FPGS Bootstrap Inference
 #'
-#' @param x An object of class "fpgs_bootstrap".
+#' @param x An object of class \code{"fpgs_bootstrap"}.
 #' @param ... Additional arguments, currently ignored.
+#'
+#' @return Invisibly returns \code{x}.
 #'
 #' @export
 print.fpgs_bootstrap <- function(x, ...) {
 
   cat("\n", x$method, "\n", sep = "")
   cat("----------------------------------\n")
+
   cat("Estimator:", x$estimator, "\n")
   cat("FPGS method:", x$fpgs_method, "\n")
   cat("Outcome type:", x$outcome_type, "\n")
@@ -203,25 +263,31 @@ print.fpgs_bootstrap <- function(x, ...) {
     x$conf.int[1], ", ", x$conf.int[2], "]\n",
     sep = ""
   )
-  cat("Bootstrap replications:", x$B_valid, "valid out of", x$B, "\n")
+  cat(
+    "Bootstrap replications:",
+    x$B_valid, "valid out of", x$B, "\n"
+  )
 
   invisible(x)
 }
 
 
-#' Summary method for FPGS bootstrap inference
+#' Summary Method for FPGS Bootstrap Inference
 #'
-#' @param object An object of class "fpgs_bootstrap".
+#' @param object An object of class \code{"fpgs_bootstrap"}.
 #' @param ... Additional arguments, currently ignored.
+#'
+#' @return A data frame containing the bootstrap inference results.
 #'
 #' @export
 summary.fpgs_bootstrap <- function(object, ...) {
 
-  out <- data.frame(
+  data.frame(
     estimator = object$estimator,
     fpgs_method = object$fpgs_method,
     outcome_type = object$outcome_type,
     estimate = object$estimate,
+    variance = object$variance,
     se = object$se,
     ci_lower = object$conf.int[1],
     ci_upper = object$conf.int[2],
@@ -229,17 +295,18 @@ summary.fpgs_bootstrap <- function(object, ...) {
     B = object$B,
     B_valid = object$B_valid
   )
-
-  out
 }
 
 
-#' Confidence interval for FPGS bootstrap inference
+#' Confidence Interval for FPGS Bootstrap Inference
 #'
-#' @param object An object of class "fpgs_bootstrap".
+#' @param object An object of class \code{"fpgs_bootstrap"}.
 #' @param parm Currently ignored.
-#' @param level Confidence level. Defaults to the level stored in object.
+#' @param level Confidence level. Defaults to the level stored in
+#'   \code{object}.
 #' @param ... Additional arguments, currently ignored.
+#'
+#' @return A numeric vector containing the lower and upper confidence limits.
 #'
 #' @export
 confint.fpgs_bootstrap <- function(object,
@@ -247,42 +314,58 @@ confint.fpgs_bootstrap <- function(object,
                                    level = object$conf.level,
                                    ...) {
 
-  if (!is.numeric(level) || length(level) != 1 || level <= 0 || level >= 1) {
+  if (!is.numeric(level) || length(level) != 1 ||
+      level <= 0 || level >= 1) {
     stop("level must be a number between 0 and 1", call. = FALSE)
   }
 
   alpha <- 1 - level
 
-  ci <- stats::quantile(
+  conf_int <- stats::quantile(
     object$boot_estimates,
     probs = c(alpha / 2, 1 - alpha / 2),
     na.rm = TRUE,
     names = FALSE
   )
 
-  names(ci) <- c("lower", "upper")
-  ci
+  names(conf_int) <- c("lower", "upper")
+
+  conf_int
 }
 
-#' Extract FPGS bootstrap estimate
+
+#' Extract FPGS Bootstrap Estimate
 #'
-#' @param object An object of class "fpgs_bootstrap".
+#' @param object An object of class \code{"fpgs_bootstrap"}.
 #' @param ... Additional arguments, currently ignored.
+#'
+#' @return The estimated average treatment effect.
 #'
 #' @export
 coef.fpgs_bootstrap <- function(object, ...) {
+
   object$estimate
 }
 
 
-#' Variance-covariance matrix for FPGS bootstrap estimate
+#' Variance-Covariance Matrix for FPGS Bootstrap Estimate
 #'
-#' @param object An object of class "fpgs_bootstrap".
+#' @param object An object of class \code{"fpgs_bootstrap"}.
 #' @param ... Additional arguments, currently ignored.
+#'
+#' @return A one-by-one matrix containing the bootstrap variance estimate.
 #'
 #' @export
 vcov.fpgs_bootstrap <- function(object, ...) {
-  out <- matrix(object$se^2, nrow = 1, ncol = 1)
-  rownames(out) <- colnames(out) <- "ATE"
-  out
+
+  variance_matrix <- matrix(
+    object$variance,
+    nrow = 1,
+    ncol = 1
+  )
+
+  rownames(variance_matrix) <- "ATE"
+  colnames(variance_matrix) <- "ATE"
+
+  variance_matrix
 }
