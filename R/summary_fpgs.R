@@ -1,23 +1,22 @@
-#' Summarize an FPGS Object
+#' Summarize an FPGS Fit
 #'
-#' Computes and displays treatment effect estimates obtained using the
-#' available FPGS-based estimators.
+#' Displays treatment effect estimates obtained from the available
+#' FPGS estimators.
 #'
 #' @param object An object of class \code{"fpgs"} returned by \code{fpgs()}.
-#' @param ... Additional arguments passed to \code{fpgs_all()}.
+#' @param ... Additional arguments passed to the summary method.
 #'
-#' @return A data frame containing the FPGS-based treatment effect estimates,
-#'   returned invisibly.
+#' @return Invisibly returns the results from \code{fpgs_all()}.
 #'
 #' @export
 summary.fpgs <- function(object, ...) {
-  
-  res <- fpgs_all(object, ...)
-  
-  cat("\nFPGS Treatment Effect Estimates\n")
+
+  res <- fpgs_ate(object)
+
+  cat("\nFPGS Estimates\n")
   cat("----------------------------------\n")
-  
+
   print(res)
-  
+
   invisible(res)
 }
