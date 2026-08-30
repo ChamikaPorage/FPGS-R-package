@@ -1,0 +1,1610 @@
+# ============================================================
+# BINARY EMPIRICAL ANALYSIS USING THE FPGS PACKAGE
+#
+# Data: final_df.csv
+# Outcome: HTN
+# Treatment: smoking
+#
+# FPGS methods:
+#   1. Parametric
+#   2. Random forest
+#
+# ATE estimators:
+#   1. Regression imputation (RI)
+#   2. Matching
+#   3. IPW
+#   4. NIPW
+#   5. AIPW
+#   6. Stratification
+#
+# Inference:
+#
+# Parametric FPGS:
+#   - Analytic
+#   - Bootstrap
+#
+# Random forest FPGS:
+#   - Bootstrap
+#
+# Bootstrap:
+#   B = 100 while testing
+#   B = 1000 for final analysis
+# ============================================================
+
+
+
+# ============================================================
+# 1. WORKING DIRECTORY
+# ============================================================
+
+setwd(
+  "C:/Users/dmgda/OneDrive/Documents/Chamika/R package"
+)
+
+
+
+# ============================================================
+# 2. LOAD REQUIRED PACKAGES
+# ============================================================
+
+library(dplyr)
+library(ranger)
+library(caret)
+library(Matching)
+
+
+
+# ============================================================
+# 3. SOURCE FPGS FUNCTIONS
+# ============================================================
+
+# Main FPGS dispatcher
+source("fpgs.R")
+
+# FPGS estimation
+source("fpgs_continuous_parametric.R")
+source("fpgs_continuous_rf.R")
+source("fpgs_binary_parametric.R")
+source("fpgs_binary_rf.R")
+
+# ATE estimators
+source("fpgs_ri.R")
+source("fpgs_matching.R")
+source("fpgs_stratification.R")
+source("fpgs_ipw.R")
+
+# Analytic variance
+source("parametric_variance_for_ri.R")
+source("parametric_variance_for_weighting.R")
+
+# Bootstrap
+source("fpgs_bootstrap.R")
+
+# Combined ATE function
+source("fpgs_ate.R")
+
+
+
+# ============================================================
+# 4. CHECK REQUIRED FUNCTIONS
+# ============================================================
+
+required_functions <- c(
+  "fpgs",
+  "fpgs_ri",
+  "fpgs_match",
+  "fpgs_stratify",
+  "fpgs_weight",
+  "ri_variance",
+  "weight_variance",
+  "fpgs_bootstrap",
+  "fpgs_ate"
+)
+
+
+function_check <- sapply(
+  required_functions,
+  exists,
+  mode = "function"
+)
+
+
+print(function_check)
+
+
+if (!all(function_check)) {
+  
+  stop(
+    "Some required FPGS functions are missing. ",
+    "Check the sourced R files."
+  )
+  
+}
+
+
+
+# ============================================================
+# 5. HELPER FUNCTION:
+# KEEP COVARIATES IDENTIFIABLE IN BOTH TREATMENT GROUPS
+# ============================================================
+
+make_group_full_rank <- function(
+    X,
+    treatment,
+    tol = 1e-7
+) {
+  
+  X <- as.matrix(X)
+  
+  
+  # Rank in full sample
+  qr_all <- qr(
+    X,
+    tol = tol
+  )
+  
+  
+  # Rank among treated
+  qr_1 <- qr(
+    X[
+      treatment == 1,
+      ,
+      drop = FALSE
+    ],
+    tol = tol
+  )
+  
+  
+  # Rank among untreated
+  qr_0 <- qr(
+    X[
+      treatment == 0,
+      ,
+      drop = FALSE
+    ],
+    tol = tol
+  )
+  
+  
+  # Retain columns estimable in all three
+  keep <- Reduce(
+    intersect,
+    list(
+      
+      qr_all$pivot[
+        seq_len(qr_all$rank)
+      ],
+      
+      qr_1$pivot[
+        seq_len(qr_1$rank)
+      ],
+      
+      qr_0$pivot[
+        seq_len(qr_0$rank)
+      ]
+      
+    )
+  )
+  
+  
+  X[
+    ,
+    sort(keep),
+    drop = FALSE
+  ]
+  
+}
+
+
+
+# ============================================================
+# 6. READ DATA
+# ============================================================
+
+datat_bin <- read.csv(
+  "final_df.csv"
+)
+
+
+
+# ============================================================
+# 7. BASIC DATA CHECKS
+# ============================================================
+
+dim(datat_bin)
+
+names(datat_bin)
+
+summary(datat_bin)
+
+
+# Outcome
+table(
+  datat_bin$HTN,
+  useNA = "ifany"
+)
+
+
+# Treatment
+table(
+  datat_bin$smoking,
+  useNA = "ifany"
+)
+
+
+# Missing values
+sum(
+  is.na(datat_bin)
+)
+
+
+
+# ============================================================
+# 8. CHECK BINARY CODING
+# ============================================================
+
+if (!all(
+  datat_bin$HTN %in% c(0, 1)
+)) {
+  
+  stop(
+    "HTN must be coded as 0/1."
+  )
+  
+}
+
+
+if (!all(
+  datat_bin$smoking %in% c(0, 1)
+)) {
+  
+  stop(
+    "Smoking must be coded as 0/1."
+  )
+  
+}
+
+
+
+# ============================================================
+# 9. RECODE GENDER
+# ============================================================
+
+datat_bin <- datat_bin %>%
+  
+  mutate(
+    
+    gender = case_when(
+      
+      gender == 1 ~ 1,
+      
+      gender == 2 ~ 0,
+      
+      TRUE ~ NA_real_
+      
+    )
+    
+  )
+
+
+table(
+  datat_bin$gender,
+  useNA = "ifany"
+)
+
+
+
+# ============================================================
+# 10. CREATE COVARIATE DESIGN MATRIX
+# ============================================================
+
+X_bin <- model.matrix(
+  
+  smoking ~
+    
+    gender +
+    
+    age +
+    
+    race +
+    
+    army.service +
+    
+    edu +
+    
+    married.living.with.partner +
+    
+    income.to.poverty +
+    
+    birth.country +
+    
+    family.size,
+  
+  data = datat_bin
+  
+)
+
+
+
+# ============================================================
+# 11. REMOVE INTERCEPT
+# ============================================================
+
+X_bin <- X_bin[
+  ,
+  -1,
+  drop = FALSE
+]
+
+
+
+# ============================================================
+# 12. CHECK NUMBER OF COVARIATES BEFORE RANK REDUCTION
+# ============================================================
+
+cat(
+  "\nCovariates before rank check:",
+  ncol(X_bin),
+  "\n"
+)
+
+
+
+# ============================================================
+# 13. REMOVE NON-IDENTIFIABLE COVARIATE COLUMNS
+#
+# Keep only columns that are full rank in:
+#   1. Full sample
+#   2. Treated group
+#   3. Untreated group
+# ============================================================
+
+original_covariate_names <- colnames(
+  X_bin
+)
+
+
+X_bin <- make_group_full_rank(
+  
+  X = X_bin,
+  
+  treatment = datat_bin$smoking
+  
+)
+
+
+
+cat(
+  "Covariates after rank check:",
+  ncol(X_bin),
+  "\n"
+)
+
+
+
+# Identify removed columns
+removed_covariates <- setdiff(
+  
+  original_covariate_names,
+  
+  colnames(X_bin)
+  
+)
+
+
+cat(
+  "\nRemoved covariates because of rank deficiency:\n"
+)
+
+
+print(
+  removed_covariates
+)
+
+
+
+# ============================================================
+# 14. CONVERT DESIGN MATRIX TO DATA FRAME
+# ============================================================
+
+X_bin <- as.data.frame(
+  X_bin
+)
+
+
+names(X_bin)
+
+dim(X_bin)
+
+
+
+# ============================================================
+# 15. CREATE FPGS DATA SET
+# ============================================================
+
+dat_bin <- data.frame(
+  
+  HTN = datat_bin$HTN,
+  
+  smoking = datat_bin$smoking,
+  
+  X_bin
+  
+)
+
+
+
+covariates_bin <- setdiff(
+  
+  names(dat_bin),
+  
+  c(
+    "HTN",
+    "smoking"
+  )
+  
+)
+
+
+
+# ============================================================
+# 16. FINAL DATA CHECKS
+# ============================================================
+
+dim(dat_bin)
+
+names(dat_bin)
+
+length(covariates_bin)
+
+
+table(
+  dat_bin$HTN
+)
+
+
+table(
+  dat_bin$smoking
+)
+
+
+sum(
+  is.na(dat_bin)
+)
+
+
+
+# ============================================================
+# 17. DESCRIPTIVE INFORMATION
+# ============================================================
+
+cat(
+  "\nSample size:",
+  nrow(dat_bin),
+  "\n"
+)
+
+
+cat(
+  "Untreated:",
+  sum(dat_bin$smoking == 0),
+  "\n"
+)
+
+
+cat(
+  "Treated:",
+  sum(dat_bin$smoking == 1),
+  "\n"
+)
+
+
+cat(
+  "HTN = 0:",
+  sum(dat_bin$HTN == 0),
+  "\n"
+)
+
+
+cat(
+  "HTN = 1:",
+  sum(dat_bin$HTN == 1),
+  "\n"
+)
+
+
+cat(
+  "Observed HTN proportion:",
+  mean(dat_bin$HTN),
+  "\n"
+)
+
+
+
+# ============================================================
+# PART A
+# PARAMETRIC BINARY FPGS
+# ============================================================
+
+
+
+# ============================================================
+# 18. FIT PARAMETRIC BINARY FPGS
+# ============================================================
+
+fit_bin_par <- fpgs(
+  
+  data = dat_bin,
+  
+  outcome = "HTN",
+  
+  treatment = "smoking",
+  
+  covariates = covariates_bin,
+  
+  outcome_type = "binary",
+  
+  method = "parametric"
+  
+)
+
+
+
+# Inspect fit
+print(
+  fit_bin_par
+)
+
+
+summary(
+  fit_bin_par$mu0_hat
+)
+
+
+summary(
+  fit_bin_par$mu1_hat
+)
+
+
+head(
+  fit_bin_par$fpgs
+)
+
+
+
+# ============================================================
+# 19. CHECK PREDICTED PROBABILITIES
+# ============================================================
+
+cat(
+  "\nRange mu0_hat:\n"
+)
+
+print(
+  range(fit_bin_par$mu0_hat)
+)
+
+
+cat(
+  "\nRange mu1_hat:\n"
+)
+
+print(
+  range(fit_bin_par$mu1_hat)
+)
+
+
+
+if (
+  any(
+    !is.finite(fit_bin_par$mu0_hat)
+  ) ||
+  any(
+    !is.finite(fit_bin_par$mu1_hat)
+  )
+) {
+  
+  stop(
+    "Non-finite FPGS predictions detected."
+  )
+  
+}
+
+
+if (
+  any(
+    fit_bin_par$mu0_hat < 0 |
+    fit_bin_par$mu0_hat > 1
+  )
+) {
+  
+  stop(
+    "mu0_hat contains values outside [0, 1]."
+  )
+  
+}
+
+
+if (
+  any(
+    fit_bin_par$mu1_hat < 0 |
+    fit_bin_par$mu1_hat > 1
+  )
+) {
+  
+  stop(
+    "mu1_hat contains values outside [0, 1]."
+  )
+  
+}
+
+
+
+# ============================================================
+# 20. PARAMETRIC POINT ESTIMATES
+# ============================================================
+
+
+# Regression imputation
+ri_bin_par <- fpgs_ri(
+  fit_bin_par
+)
+
+
+# Matching
+match_bin_par <- fpgs_match(
+  
+  fit_bin_par,
+  
+  M = 1
+  
+)
+
+
+# IPW
+ipw_bin_par <- fpgs_weight(
+  
+  fit_bin_par,
+  
+  type = "ipw"
+  
+)
+
+
+# NIPW
+nipw_bin_par <- fpgs_weight(
+  
+  fit_bin_par,
+  
+  type = "nipw"
+  
+)
+
+
+# AIPW
+aipw_bin_par <- fpgs_weight(
+  
+  fit_bin_par,
+  
+  type = "aipw"
+  
+)
+
+
+# Stratification
+strat_bin_par <- fpgs_stratify(
+  
+  fit_bin_par,
+  
+  n_bins = 4,
+  
+  min_cell = 3
+  
+)
+
+
+
+# ============================================================
+# 21. PARAMETRIC POINT ESTIMATE TABLE
+# ============================================================
+
+point_bin_par <- data.frame(
+  
+  estimator = c(
+    "RI",
+    "Matching",
+    "IPW",
+    "NIPW",
+    "AIPW",
+    "Stratification"
+  ),
+  
+  estimate = c(
+    ri_bin_par$estimate,
+    match_bin_par$estimate,
+    ipw_bin_par$estimate,
+    nipw_bin_par$estimate,
+    aipw_bin_par$estimate,
+    strat_bin_par$estimate
+  )
+  
+)
+
+
+print(
+  point_bin_par
+)
+
+
+
+# ============================================================
+# 22. PARAMETRIC STRATIFICATION DIAGNOSTICS
+# ============================================================
+
+cat(
+  "\nParametric binary FPGS stratification:\n"
+)
+
+
+cat(
+  "Retained strata:",
+  strat_bin_par$n_retained_strata,
+  "\n"
+)
+
+
+cat(
+  "Dropped strata:",
+  strat_bin_par$n_dropped_strata,
+  "\n"
+)
+
+
+cat(
+  "Dropped observations:",
+  strat_bin_par$n_dropped_obs,
+  "\n"
+)
+
+
+cat(
+  "Retained observations:",
+  strat_bin_par$n_retained_obs,
+  "\n"
+)
+
+
+
+# ============================================================
+# 23. TEST ANALYTIC VARIANCE FUNCTIONS SEPARATELY
+#
+# Doing this before fpgs_ate() makes errors easier to identify.
+# ============================================================
+
+
+# RI variance
+ri_var_bin <- ri_variance(
+  fit_bin_par
+)
+
+
+print(
+  ri_var_bin
+)
+
+
+
+# IPW variance
+ipw_var_bin <- weight_variance(
+  
+  fit_bin_par,
+  
+  type = "ipw"
+  
+)
+
+
+print(
+  ipw_var_bin
+)
+
+
+
+# NIPW variance
+nipw_var_bin <- weight_variance(
+  
+  fit_bin_par,
+  
+  type = "nipw"
+  
+)
+
+
+print(
+  nipw_var_bin
+)
+
+
+
+# AIPW variance
+aipw_var_bin <- weight_variance(
+  
+  fit_bin_par,
+  
+  type = "aipw"
+  
+)
+
+
+print(
+  aipw_var_bin
+)
+
+
+
+# ============================================================
+# 24A. PARAMETRIC ANALYTIC INFERENCE
+# ============================================================
+
+results_bin_par_analytic <- fpgs_ate(
+  
+  fit = fit_bin_par,
+  
+  inference = "analytic",
+  
+  conf.level = 0.95,
+  
+  M = 1,
+  
+  n_bins = 4,
+  
+  min_cell = 3
+  
+)
+
+
+
+results_bin_par_analytic$FPGS_method <-
+  "Parametric"
+
+
+results_bin_par_analytic$Inference <-
+  "Analytic"
+
+
+
+results_bin_par_analytic <-
+  
+  results_bin_par_analytic[
+    ,
+    c(
+      "FPGS_method",
+      "Inference",
+      "estimator",
+      "estimate",
+      "variance",
+      "se",
+      "ci_lower",
+      "ci_upper"
+    )
+  ]
+
+
+
+print(
+  results_bin_par_analytic
+)
+
+
+
+# ============================================================
+# 24B. PARAMETRIC BOOTSTRAP INFERENCE
+#
+# B = 100 while testing
+# B = 1000 for final analysis
+# ============================================================
+
+set.seed(
+  2026
+)
+
+
+results_bin_par_bootstrap <- fpgs_ate(
+  
+  fit = fit_bin_par,
+  
+  inference = "bootstrap",
+  
+  B = 100,
+  
+  conf.level = 0.95,
+  
+  M = 1,
+  
+  n_bins = 4,
+  
+  min_cell = 3
+  
+)
+
+
+
+results_bin_par_bootstrap$FPGS_method <-
+  "Parametric"
+
+
+results_bin_par_bootstrap$Inference <-
+  "Bootstrap"
+
+
+
+results_bin_par_bootstrap <-
+  
+  results_bin_par_bootstrap[
+    ,
+    c(
+      "FPGS_method",
+      "Inference",
+      "estimator",
+      "estimate",
+      "variance",
+      "se",
+      "ci_lower",
+      "ci_upper"
+    )
+  ]
+
+
+
+print(
+  results_bin_par_bootstrap
+)
+
+
+
+# ============================================================
+# 25. CHECK THAT PARAMETRIC POINT ESTIMATES MATCH
+#
+# Inference method should not change the original estimate.
+# ============================================================
+
+print(
+  
+  all.equal(
+    
+    results_bin_par_analytic$estimate,
+    
+    results_bin_par_bootstrap$estimate
+    
+  )
+  
+)
+
+
+
+# ============================================================
+# PART B
+# RANDOM FOREST BINARY FPGS
+# ============================================================
+
+
+
+# ============================================================
+# 26. FIT RANDOM FOREST BINARY FPGS
+# ============================================================
+
+set.seed(
+  2026
+)
+
+
+fit_bin_rf <- fpgs(
+  
+  data = dat_bin,
+  
+  outcome = "HTN",
+  
+  treatment = "smoking",
+  
+  covariates = covariates_bin,
+  
+  outcome_type = "binary",
+  
+  method = "rf",
+  
+  folds = 5,
+  
+  num.trees = 300,
+  
+  mtry = 2,
+  
+  min.node.size = 5
+  
+)
+
+
+
+# Inspect RF fit
+print(
+  fit_bin_rf
+)
+
+
+summary(
+  fit_bin_rf$mu0_hat
+)
+
+
+summary(
+  fit_bin_rf$mu1_hat
+)
+
+
+head(
+  fit_bin_rf$fpgs
+)
+
+
+
+# ============================================================
+# 27. CHECK RF PREDICTED PROBABILITIES
+# ============================================================
+
+print(
+  range(fit_bin_rf$mu0_hat)
+)
+
+
+print(
+  range(fit_bin_rf$mu1_hat)
+)
+
+
+
+if (
+  any(
+    fit_bin_rf$mu0_hat < 0 |
+    fit_bin_rf$mu0_hat > 1
+  )
+) {
+  
+  stop(
+    "RF mu0_hat contains values outside [0, 1]."
+  )
+  
+}
+
+
+if (
+  any(
+    fit_bin_rf$mu1_hat < 0 |
+    fit_bin_rf$mu1_hat > 1
+  )
+) {
+  
+  stop(
+    "RF mu1_hat contains values outside [0, 1]."
+  )
+  
+}
+
+
+
+# ============================================================
+# 28. RANDOM FOREST POINT ESTIMATES
+# ============================================================
+
+set.seed(
+  2026
+)
+
+
+# RI
+ri_bin_rf <- fpgs_ri(
+  fit_bin_rf
+)
+
+
+# Matching
+match_bin_rf <- fpgs_match(
+  
+  fit_bin_rf,
+  
+  M = 1
+  
+)
+
+
+# IPW
+ipw_bin_rf <- fpgs_weight(
+  
+  fit_bin_rf,
+  
+  type = "ipw"
+  
+)
+
+
+# NIPW
+nipw_bin_rf <- fpgs_weight(
+  
+  fit_bin_rf,
+  
+  type = "nipw"
+  
+)
+
+
+# AIPW
+aipw_bin_rf <- fpgs_weight(
+  
+  fit_bin_rf,
+  
+  type = "aipw"
+  
+)
+
+
+# Stratification
+strat_bin_rf <- fpgs_stratify(
+  
+  fit_bin_rf,
+  
+  n_bins = 4,
+  
+  min_cell = 3
+  
+)
+
+
+
+# ============================================================
+# 29. RF POINT ESTIMATE TABLE
+# ============================================================
+
+point_bin_rf <- data.frame(
+  
+  estimator = c(
+    "RI",
+    "Matching",
+    "IPW",
+    "NIPW",
+    "AIPW",
+    "Stratification"
+  ),
+  
+  estimate = c(
+    ri_bin_rf$estimate,
+    match_bin_rf$estimate,
+    ipw_bin_rf$estimate,
+    nipw_bin_rf$estimate,
+    aipw_bin_rf$estimate,
+    strat_bin_rf$estimate
+  )
+  
+)
+
+
+print(
+  point_bin_rf
+)
+
+
+
+# ============================================================
+# 30. RF STRATIFICATION DIAGNOSTICS
+# ============================================================
+
+cat(
+  "\nRandom forest binary FPGS stratification:\n"
+)
+
+
+cat(
+  "Retained strata:",
+  strat_bin_rf$n_retained_strata,
+  "\n"
+)
+
+
+cat(
+  "Dropped strata:",
+  strat_bin_rf$n_dropped_strata,
+  "\n"
+)
+
+
+cat(
+  "Dropped observations:",
+  strat_bin_rf$n_dropped_obs,
+  "\n"
+)
+
+
+cat(
+  "Retained observations:",
+  strat_bin_rf$n_retained_obs,
+  "\n"
+)
+
+
+
+# ============================================================
+# 31. RF BOOTSTRAP INFERENCE
+#
+# B = 100 while testing
+# B = 1000 for final analysis
+# ============================================================
+
+set.seed(
+  2026
+)
+
+
+results_bin_rf <- fpgs_ate(
+  
+  fit = fit_bin_rf,
+  
+  inference = "bootstrap",
+  
+  B = 100,
+  
+  conf.level = 0.95,
+  
+  M = 1,
+  
+  n_bins = 4,
+  
+  min_cell = 3
+  
+)
+
+
+
+results_bin_rf$FPGS_method <-
+  "Random forest"
+
+
+results_bin_rf$Inference <-
+  "Bootstrap"
+
+
+
+results_bin_rf <-
+  
+  results_bin_rf[
+    ,
+    c(
+      "FPGS_method",
+      "Inference",
+      "estimator",
+      "estimate",
+      "variance",
+      "se",
+      "ci_lower",
+      "ci_upper"
+    )
+  ]
+
+
+
+print(
+  results_bin_rf
+)
+
+
+
+# ============================================================
+# 32. CHECK RESULT COLUMN STRUCTURE
+# ============================================================
+
+print(
+  names(results_bin_par_analytic)
+)
+
+
+print(
+  names(results_bin_par_bootstrap)
+)
+
+
+print(
+  names(results_bin_rf)
+)
+
+
+
+# ============================================================
+# 33. COMBINE ALL RESULTS
+# ============================================================
+
+results_bin_all <- rbind(
+  
+  results_bin_par_analytic,
+  
+  results_bin_par_bootstrap,
+  
+  results_bin_rf
+  
+)
+
+
+
+print(
+  results_bin_all
+)
+
+
+
+# ============================================================
+# 34. CHECK EXPECTED RESULT COUNTS
+# ============================================================
+
+cat(
+  "\nNumber of rows:",
+  nrow(results_bin_all),
+  "\n"
+)
+
+
+print(
+  
+  table(
+    
+    results_bin_all$FPGS_method,
+    
+    results_bin_all$Inference
+    
+  )
+  
+)
+
+
+
+# ============================================================
+# 35. CREATE ROUNDED FINAL TABLE
+# ============================================================
+
+results_bin_table <-
+  results_bin_all
+
+
+
+numeric_columns <- c(
+  "estimate",
+  "variance",
+  "se",
+  "ci_lower",
+  "ci_upper"
+)
+
+
+
+results_bin_table[
+  numeric_columns
+] <- lapply(
+  
+  results_bin_table[
+    numeric_columns
+  ],
+  
+  round,
+  
+  digits = 4
+  
+)
+
+
+
+print(
+  results_bin_table
+)
+
+
+
+# ============================================================
+# 36. STRATIFICATION DIAGNOSTICS TABLE
+# ============================================================
+
+stratification_bin_diagnostics <- data.frame(
+  
+  FPGS_method = c(
+    "Parametric",
+    "Random forest"
+  ),
+  
+  retained_strata = c(
+    strat_bin_par$n_retained_strata,
+    strat_bin_rf$n_retained_strata
+  ),
+  
+  dropped_strata = c(
+    strat_bin_par$n_dropped_strata,
+    strat_bin_rf$n_dropped_strata
+  ),
+  
+  retained_observations = c(
+    strat_bin_par$n_retained_obs,
+    strat_bin_rf$n_retained_obs
+  ),
+  
+  dropped_observations = c(
+    strat_bin_par$n_dropped_obs,
+    strat_bin_rf$n_dropped_obs
+  )
+  
+)
+
+
+
+print(
+  stratification_bin_diagnostics
+)
+
+
+
+# ============================================================
+# 37. SAVE RESULTS
+# ============================================================
+
+write.csv(
+  
+  results_bin_table,
+  
+  file =
+    "final_df_binary_FPGS_results.csv",
+  
+  row.names = FALSE
+  
+)
+
+
+
+write.csv(
+  
+  stratification_bin_diagnostics,
+  
+  file =
+    "final_df_binary_FPGS_stratification_diagnostics.csv",
+  
+  row.names = FALSE
+  
+)
+
+
+
+# ============================================================
+# 38. SAVE UNROUNDED RESULTS
+# ============================================================
+
+saveRDS(
+  
+  results_bin_all,
+  
+  file =
+    "final_df_binary_FPGS_results_unrounded.rds"
+  
+)
+
+
+
+# ============================================================
+# 39. SAVE POINT ESTIMATES
+# ============================================================
+
+point_bin_par$FPGS_method <-
+  "Parametric"
+
+
+point_bin_rf$FPGS_method <-
+  "Random forest"
+
+
+
+point_bin_all <- rbind(
+  
+  point_bin_par,
+  
+  point_bin_rf
+  
+)
+
+
+
+point_bin_all <- point_bin_all[
+  ,
+  c(
+    "FPGS_method",
+    "estimator",
+    "estimate"
+  )
+]
+
+
+
+write.csv(
+  
+  point_bin_all,
+  
+  file =
+    "final_df_binary_FPGS_point_estimates.csv",
+  
+  row.names = FALSE
+  
+)
+
+
+
+# ============================================================
+# 40. FINAL DISPLAY
+# ============================================================
+
+cat(
+  "\n============================================\n"
+)
+
+cat(
+  "FINAL BINARY FPGS EMPIRICAL RESULTS\n"
+)
+
+cat(
+  "============================================\n"
+)
+
+cat(
+  "Outcome: HTN\n"
+)
+
+cat(
+  "Treatment: smoking\n"
+)
+
+cat(
+  "\nParametric FPGS:\n"
+)
+
+cat(
+  "  - Analytic inference\n"
+)
+
+cat(
+  "  - Bootstrap inference\n"
+)
+
+cat(
+  "\nRandom forest FPGS:\n"
+)
+
+cat(
+  "  - Bootstrap inference\n"
+)
+
+cat(
+  "\nStratification bins: 3\n"
+)
+
+cat(
+  "Minimum cell warning threshold: 3\n"
+)
+
+cat(
+  "Bootstrap B: 100 while testing\n"
+)
+
+cat(
+  "Final bootstrap B: 1000\n"
+)
+
+cat(
+  "Confidence level: 95%\n"
+)
+
+cat(
+  "============================================\n\n"
+)
+
+
+
+print(
+  results_bin_table
+)
