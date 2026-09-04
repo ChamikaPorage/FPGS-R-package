@@ -1,0 +1,228 @@
+#' Parametric Variance for the FPGS Regression Imputation Estimator
+#'
+#' Computes the sandwich variance and standard error for the FPGS
+#' regression imputation estimator using stacked estimating equations.
+#'
+#' Both continuous and binary outcomes are supported. For continuous
+#' outcomes, separate linear regression models are used in the treated
+#' and untreated groups. For binary outcomes, separate logistic
+#' regression models are used.
+#'
+#' @param fit An object of class \code{"fpgs"} returned by \code{fpgs()}.
+#' @param outcome_type Character string specifying the outcome type.
+#'   Must be either \code{"continuous"} or \code{"binary"}.
+#'
+#' @return A list containing:
+#' \describe{
+#'   \item{estimate}{The regression imputation estimate of the ATE.}
+#'   \item{variance}{Estimated sandwich variance of the ATE estimator.}
+#'   \item{se}{Estimated standard error of the ATE estimator.}
+#' }
+#'
+#' @details
+#' The variance estimator is based on a stacked M-estimation system
+#' containing the estimating equations for the treated and untreated
+#' outcome models together with the estimating equation defining the
+#' regression imputation average treatment effect.
+#'
+#' For continuous outcomes, an identity link is used. For binary
+#' outcomes, a logit link is used.
+#'
+#' This variance estimator is intended for parametrically estimated
+#' FPGS models. Bootstrap inference should be used when the FPGS
+#' components are estimated using machine-learning methods.
+#'
+#' @keywords internal
+ri_variance <- function(fit,
+                        outcome_type = c("continuous", "binary")) {
+
+  if (!inherits(fit, "fpgs")) {
+    stop("fit must be an object returned by fpgs()")
+  }
+
+  outcome_type <- match.arg(outcome_type)
+
+  dat <- fit$data
+
+  Y <- dat[[fit$outcome]]
+  Tr <- dat[[fit$treatment]]
+
+  X <- model.matrix(
+    reformulate(fit$covariates),
+    data = dat
+  )
+
+  K <- ncol(X)
+  Xnames <- colnames(X)
+
+  # ------------------------------------------------------------
+  # Fit the two parametric outcome models
+  # ------------------------------------------------------------
+
+  if (outcome_type == "binary") {
+
+    fit1 <- glm.fit(
+      x = X[Tr == 1, , drop = FALSE],
+      y = Y[Tr == 1],
+      family = binomial(),
+      intercept = FALSE
+    )
+
+    fit0 <- glm.fit(
+      x = X[Tr == 0, , drop = FALSE],
+      y = Y[Tr == 0],
+      family = binomial(),
+      intercept = FALSE
+    )
+
+  } else {
+
+    fit1 <- lm.fit(
+      x = X[Tr == 1, , drop = FALSE],
+      y = Y[Tr == 1]
+    )
+
+    fit0 <- lm.fit(
+      x = X[Tr == 0, , drop = FALSE],
+      y = Y[Tr == 0]
+    )
+  }
+
+  beta1_0 <- fit1$coefficients
+  beta0_0 <- fit0$coefficients
+
+  if (anyNA(beta1_0) || anyNA(beta0_0)) {
+    stop("The parametric outcome models contain unidentified coefficients.")
+  }
+
+  # ------------------------------------------------------------
+  # Initial fitted outcome means
+  # ------------------------------------------------------------
+
+  eta1_0 <- drop(X %*% beta1_0)
+  eta0_0 <- drop(X %*% beta0_0)
+
+  if (outcome_type == "binary") {
+
+    m1_0 <- plogis(eta1_0)
+    m0_0 <- plogis(eta0_0)
+
+  } else {
+
+    m1_0 <- eta1_0
+    m0_0 <- eta0_0
+  }
+
+  # Regression imputation estimate
+  tau_0 <- mean(m1_0 - m0_0)
+
+  theta0 <- c(
+    beta1_0,
+    beta0_0,
+    tau_0
+  )
+
+  # ------------------------------------------------------------
+  # Data passed to geex
+  # ------------------------------------------------------------
+
+  units <- data.frame(
+    Y = Y,
+    Tr = Tr,
+    as.data.frame(X, check.names = FALSE),
+    check.names = FALSE
+  )
+
+  # ------------------------------------------------------------
+  # Stacked estimating equations
+  # ------------------------------------------------------------
+
+  estFUN <- function(data) {
+
+    function(theta) {
+
+      beta1 <- theta[1:K]
+
+      beta0 <- theta[
+        K + (1:K)
+      ]
+
+      tau <- theta[
+        2 * K + 1
+      ]
+
+      x <- as.numeric(
+        unlist(
+          data[Xnames],
+          use.names = FALSE
+        )
+      )
+
+      eta1 <- sum(x * beta1)
+      eta0 <- sum(x * beta0)
+
+      if (outcome_type == "binary") {
+
+        m1 <- plogis(eta1)
+        m0 <- plogis(eta0)
+
+      } else {
+
+        m1 <- eta1
+        m0 <- eta0
+      }
+
+      # Outcome-model estimating equations
+      psi_beta1 <-
+        data$Tr *
+        (data$Y - m1) *
+        x
+
+      psi_beta0 <-
+        (1 - data$Tr) *
+        (data$Y - m0) *
+        x
+
+      # Regression imputation ATE
+      psi_tau <-
+        tau -
+        (m1 - m0)
+
+      c(
+        psi_beta1,
+        psi_beta0,
+        psi_tau
+      )
+    }
+  }
+
+  # ------------------------------------------------------------
+  # M-estimation
+  # ------------------------------------------------------------
+
+  geex_fit <- geex::m_estimate(
+    estFUN = estFUN,
+    data = units,
+    roots = theta0,
+    compute_roots = FALSE
+  )
+
+  # ------------------------------------------------------------
+  # Sandwich variance
+  # ------------------------------------------------------------
+
+  theta_hat <- geex::roots(geex_fit)
+  V <- geex::vcov(geex_fit)
+
+  tau_index <- 2 * K + 1
+
+  variance <- V[tau_index,tau_index]
+
+  se <- sqrt(variance)
+
+  list(
+    estimate = unname(theta0[tau_index]),
+    variance = unname(variance),
+    se = unname(se)
+  )
+}
